@@ -13,9 +13,9 @@ from ultralytics.utils.benchmarks import benchmark
 
 # Import our modules after Streamlit configuration
 from modules import (
-    DEVICE, MODEL_SIZES, TASKS,
+    DEFAULT_DEVICE, MODEL_SIZES, TASKS, AVAILABLE_DEVICES,
     load_model, run_inference, process_results,
-    TrackingManager
+    TrackingManager, CLASSES
 )
 
 # -- Streamlit UI Setup --------------------------------------------------
@@ -36,7 +36,16 @@ with col2:
 
 # Sidebar controls
 st.sidebar.header("Settings")
-st.sidebar.write(f"**Device:** {DEVICE.upper()} | Torch {torch.__version__}")
+
+# Device selector
+device = st.sidebar.selectbox(
+    "Compute Device",
+    options=AVAILABLE_DEVICES,
+    index=AVAILABLE_DEVICES.index(DEFAULT_DEVICE),
+    help="Select the compute device for inference"
+)
+
+st.sidebar.write(f"**Device:** {device.upper()} | Torch {torch.__version__}")
 
 size = st.sidebar.selectbox("Model size", MODEL_SIZES, index=0)
 options = {t: st.sidebar.checkbox(t.capitalize(), value=(t=='detect')) for t in TASKS}
@@ -45,11 +54,11 @@ start, stop = st.sidebar.button("Start"), st.sidebar.button("Stop")
 
 # -- Benchmark ---------------------------------------------------------
 if benchmark_enabled:
-    st.sidebar.write(f"Benchmarking detect/{size} on {DEVICE}…")
-    bm = load_model('detect', size)
+    st.sidebar.write(f"Benchmarking detect/{size} on {device}…")
+    bm = load_model('detect', size, device)
     if bm is not None:
         stats = benchmark(model=bm, data="coco8.yaml", imgsz=640,
-                         device=DEVICE, half=(DEVICE=='mps'))
+                         device=device, half=(device in ['mps', 'cuda']))
         st.sidebar.write(stats)
 
 # -- Main loop --------------------------------------------------------
@@ -73,7 +82,7 @@ if start:
     models = {}
     for task in active_tasks:
         try:
-            models[task] = load_model(task, size)
+            models[task] = load_model(task, size, device)
             if models[task] is None:
                 st.error(f"Failed to load model for {task}")
                 continue
@@ -107,7 +116,7 @@ if start:
                     continue
                 
                 # Run inference
-                results = run_inference(models[task], frame, task)
+                results = run_inference(models[task], frame, task, device=device)
                 
                 if not results:  # Skip if no results
                     continue
@@ -131,8 +140,8 @@ if start:
                             # Add to detection data
                             detection_data.append({
                                 'Task': 'Tracking',
-                                'ID': track_id,
-                                'Class': int(cls),
+                                'ID': str(track_id),
+                                'Class': CLASSES.get(int(cls), f"class_{int(cls)}"),
                                 'Confidence': f"{conf:.2f}",
                                 'Position': f"({center_x}, {center_y})"
                             })
@@ -165,7 +174,7 @@ if start:
                             detection_data.append({
                                 'Task': task.capitalize(),
                                 'ID': '-',
-                                'Class': int(cls),
+                                'Class': CLASSES.get(int(cls), f"class_{int(cls)}"),
                                 'Confidence': f"{conf:.2f}",
                                 'Position': f"({center_x}, {center_y})"
                             })
@@ -179,7 +188,7 @@ if start:
 
         dt = time.perf_counter() - t0
         fps = 1/dt if dt>0 else 0
-        perf_disp.write(f"{DEVICE.upper()} — {dt*1000:.1f} ms/frame — {fps:.1f} FPS")
+        perf_disp.write(f"{device.upper()} — {dt*1000:.1f} ms/frame — {fps:.1f} FPS")
         frame_disp.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
                         use_container_width=True)
 

@@ -5,7 +5,7 @@ Visualization functions for YOLO11 Live Demo
 import cv2
 import numpy as np
 import streamlit as st
-from .config import PALETTE, SKELETON_PARTS
+from .config import PALETTE, SKELETON_PARTS, CLASSES
 
 def draw_oriented_box(img, points, color, label=None):
     """Draw an oriented bounding box with its label."""
@@ -20,11 +20,24 @@ def draw_oriented_box(img, points, color, label=None):
         cv2.putText(img, label, (x, y-5),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
-def draw_detection_box(img, box, conf, cls, color=(0,255,0)):
-    """Draw a standard detection box with label."""
+def draw_detection_box(img, box, conf, cls_id, color=(0,255,0), track_id=None):
+    """Draw a standard detection box with label (and optional track ID)."""
     try:
         x1, y1, x2, y2 = box.astype(int)
-        label = f"{cls}:{conf:.2f}"
+        # Get class name from the mapping
+        cls_name = CLASSES.get(int(cls_id), f"class_{cls_id}")
+        # Format label to show class name first, then track ID if available
+        if track_id is not None:
+            label = f"{cls_name} (ID:{track_id}) {conf:.2f}"
+        else:
+            label = f"{cls_name} {conf:.2f}"
+            
+        # Ensure color is a tuple of 3 integers
+        if isinstance(color, (tuple, list, np.ndarray)):
+            color = tuple(map(int, color[:3]))  # Convert to tuple and ensure 3 channels
+        else:
+            color = (0, 255, 0)  # Default to green if invalid color
+            
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
         cv2.putText(img, label, (x1, y1-5),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
@@ -59,21 +72,29 @@ def draw_segmentation_mask(img, mask, color):
 def draw_pose_keypoints(img, person_keypoints):
     """Draw pose keypoints and skeleton."""
     try:
-        # Draw joints
-        for idx, (x, y, c) in enumerate(person_keypoints):
-            if c > 0.3:
-                cv2.circle(img, (int(x), int(y)), 4, (255,255,255), -1)
+        height, width = img.shape[:2]
+        margin = 2  # pixels margin from the edge to consider valid
         
-        # Draw bones by body part
+        # Helper function to check if point is valid
+        def is_valid_point(x, y, c):
+            return (c > 0.3 and 
+                   margin <= x <= width - margin and 
+                   margin <= y <= height - margin)
+        
+        # Draw joints
+        valid_points = {}  # Store valid points for skeleton drawing
+        for idx, (x, y, c) in enumerate(person_keypoints):
+            if is_valid_point(x, y, c):
+                cv2.circle(img, (int(x), int(y)), 4, (255,255,255), -1)
+                valid_points[idx] = (int(x), int(y))
+        
+        # Draw bones by body part, but only if both endpoints are valid
         for part_name, part_info in SKELETON_PARTS.items():
             for a, b in part_info['connections']:
-                xa, ya, ca = person_keypoints[a]
-                xb, yb, cb = person_keypoints[b]
-                if ca > 0.3 and cb > 0.3:
-                    cv2.line(img,
-                            (int(xa), int(ya)),
-                            (int(xb), int(yb)),
-                            part_info['color'], 2)
+                if a in valid_points and b in valid_points:
+                    xa, ya = valid_points[a]
+                    xb, yb = valid_points[b]
+                    cv2.line(img, (xa, ya), (xb, yb), part_info['color'], 2)
     except Exception as e:
         st.error(f"Error drawing pose keypoints: {str(e)}")
 
@@ -87,51 +108,59 @@ def process_results(img, results, task, track_colors={}, position_history={},
     
     try:
         for r in results:
-            # Standard Boxes and Tracking
-            if hasattr(r, 'boxes') and r.boxes is not None and not hasattr(r, 'obb'):
+            if r is None:
+                continue
+                
+            # Standard Boxes and Tracking (for non-OBB tasks)
+            if task != 'obb' and hasattr(r, 'boxes') and r.boxes is not None:
                 boxes = r.boxes
-                xyxys = boxes.xyxy.cpu().numpy()
-                confs = boxes.conf.cpu().numpy()
-                clss = boxes.cls.cpu().numpy()
-                
-                # Get track IDs if available
-                track_ids = None
-                if hasattr(boxes, 'id'):
-                    track_ids = boxes.id.cpu().numpy()
-                
-                for i, (xyxy, conf, cls) in enumerate(zip(xyxys, confs, clss)):
-                    # Get tracking ID and color
-                    track_id = int(track_ids[i]) if track_ids is not None else None
-                    color = track_colors.get(track_id, (0,255,0)) if track_id else (0,255,0)
+                if hasattr(boxes, 'xyxy') and boxes.xyxy is not None:
+                    xyxys = boxes.xyxy.cpu().numpy()
+                    confs = boxes.conf.cpu().numpy()
+                    clss = boxes.cls.cpu().numpy()
                     
-                    # Draw box and label
-                    draw_detection_box(overlay, xyxy, conf, int(cls), color)
+                    # Get track IDs if available
+                    track_ids = None
+                    if hasattr(boxes, 'id') and boxes.id is not None:
+                        track_ids = boxes.id.cpu().numpy()
                     
-                    # Draw motion trail if tracking
-                    if track_id and current_time and trail_duration:
-                        if track_id in position_history:
-                            draw_motion_trail(overlay, position_history[track_id], 
-                                           color, current_time, trail_duration)
+                    for i, (xyxy, conf, cls) in enumerate(zip(xyxys, confs, clss)):
+                        # Get tracking ID and color
+                        track_id = int(track_ids[i]) if track_ids is not None else None
+                        color = track_colors.get(track_id, (0,255,0)) if track_id else (0,255,0)
+                        
+                        # Draw box and label
+                        draw_detection_box(overlay, xyxy, conf, int(cls), color, track_id=track_id)
+                        
+                        # Draw motion trail if tracking
+                        if track_id and current_time and trail_duration:
+                            if track_id in position_history:
+                                draw_motion_trail(overlay, position_history[track_id], 
+                                               color, current_time, trail_duration)
             
-            # Oriented Bounding Boxes
-            if hasattr(r, 'obb') and r.obb is not None:
+            # Oriented Bounding Boxes (only for OBB task)
+            if task == 'obb' and hasattr(r, 'obb') and r.obb is not None:
                 boxes = r.obb
-                points = boxes.xyxyxyxy.cpu().numpy()
-                confs = boxes.conf.cpu().numpy()
-                classes = boxes.cls.cpu().numpy()
-                
-                for pts, conf, cls in zip(points, confs, classes):
-                    pts = pts.reshape(-1, 2)
-                    label = f"{int(cls)}:{conf:.2f}"
-                    color = PALETTE[int(cls) % len(PALETTE)]
-                    draw_oriented_box(overlay, pts, color, label)
+                if hasattr(boxes, 'xyxyxyxy') and boxes.xyxyxyxy is not None:
+                    points = boxes.xyxyxyxy.cpu().numpy()
+                    confs = boxes.conf.cpu().numpy()
+                    classes = boxes.cls.cpu().numpy()
+                    
+                    for pts, conf, cls in zip(points, confs, classes):
+                        pts = pts.reshape(-1, 2)
+                        label = f"{int(cls)}:{conf:.2f}"
+                        color = PALETTE[int(cls) % len(PALETTE)]
+                        draw_oriented_box(overlay, pts, color, label)
             
             # Segmentation Masks
-            if hasattr(r, 'masks') and r.masks is not None:
+            if hasattr(r, 'masks') and r.masks is not None and hasattr(r.masks, 'data'):
                 masks = r.masks.data.cpu().numpy()
                 for idx, mask in enumerate(masks):
                     try:
-                        tid = int(r.boxes.id.cpu().numpy()[idx])
+                        if hasattr(r, 'boxes') and r.boxes is not None and hasattr(r.boxes, 'id'):
+                            tid = int(r.boxes.id.cpu().numpy()[idx])
+                        else:
+                            tid = idx
                     except:
                         tid = idx
                     if tid not in track_colors:
@@ -146,10 +175,11 @@ def process_results(img, results, task, track_colors={}, position_history={},
             # Pose Keypoints
             if hasattr(r, 'keypoints') and r.keypoints is not None:
                 kp = getattr(r.keypoints, 'data', r.keypoints)
-                pts = kp.cpu().numpy()
-                people = pts if pts.ndim==3 else [pts] if pts.ndim==2 else []
-                for person in people:
-                    draw_pose_keypoints(overlay, person)
+                if kp is not None:
+                    pts = kp.cpu().numpy()
+                    people = pts if pts.ndim==3 else [pts] if pts.ndim==2 else []
+                    for person in people:
+                        draw_pose_keypoints(overlay, person)
     except Exception as e:
         st.error(f"Error processing results: {str(e)}")
         return img

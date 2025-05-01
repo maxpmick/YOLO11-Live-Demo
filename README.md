@@ -25,8 +25,8 @@ A real-time object detection and tracking application using YOLO11 models, optim
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/yolo11-live-demo.git
-cd yolo11-live-demo
+git clone https://github.com/maxpmick/YOLO11-Live-Demo.git
+cd YOLO11-Live-Demo
 ```
 
 2. Make the setup script executable:
@@ -58,6 +58,8 @@ streamlit run aio.py
 ```
 
 3. Open your web browser and navigate to the displayed URL (typically http://localhost:8501)
+
+4. Accept the webcam permission request from your OS, you may have to restart the program and run it again for the camera feed to become available.
 
 ## Interface Guide
 

@@ -4,7 +4,6 @@ Model loading and inference functionality for YOLO11 Live Demo
 
 import streamlit as st
 from ultralytics import YOLO
-from .config import DEVICE
 import os
 import torch
 
@@ -38,7 +37,7 @@ def download_model(task: str, size: str):
     return True
 
 @st.cache_resource
-def load_model(task: str, size: str):
+def load_model(task: str, size: str, device: str = 'cpu'):
     """Load a YOLO model with caching."""
     suffix_map = {
         'detect': '',
@@ -57,30 +56,30 @@ def load_model(task: str, size: str):
     
     try:
         model = YOLO(weights)
-        model.to(DEVICE)
+        model.to(device)
         model.fuse()
         model.model.eval()
-        if DEVICE == 'mps':
-            model.model.half()
-        st.success(f"Model loaded successfully on {DEVICE}")
+        if device in ['mps', 'cuda']:
+            model.model.half()  # Use half precision for MPS and CUDA
+        st.success(f"Model loaded successfully on {device}")
         return model
     except Exception as e:
         st.error(f"Failed to load model: {str(e)}")
         return None
 
-def run_inference(model, frame, task, **kwargs):
+def run_inference(model, frame, task, device='cpu', **kwargs):
     """Run model inference with appropriate settings."""
     if model is None:
         st.error("Model not loaded. Cannot run inference.")
         return []
         
     # Use CPU for pose detection due to MPS issues
-    curr_dev = 'cpu' if task == 'pose' else DEVICE
+    curr_dev = 'cpu' if task == 'pose' else device
     
     inference_kwargs = {
         'source': frame,
         'device': curr_dev,
-        'half': (curr_dev=='mps'),
+        'half': (curr_dev in ['mps', 'cuda']),
         'verbose': False,
         'conf': 0.25,  # Set confidence threshold
         'iou': 0.45,   # Set IoU threshold
