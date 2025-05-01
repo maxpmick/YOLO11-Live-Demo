@@ -41,13 +41,10 @@ progress() {
 download_models() {
     local models_dir="models"
     local base_url="https://github.com/ultralytics/assets/releases/download/v8.3.0"
-    declare -A model_sizes=(
-        ["n"]="2.6M"
-        ["s"]="9.4M"
-        ["m"]="20.1M"
-        ["l"]="25.3M"
-        ["x"]="56.9M"
-    )
+    
+    # Define model sizes as separate arrays
+    local model_sizes=("n" "s" "m" "l" "x")
+    local size_values=("2.6M" "9.4M" "20.1M" "25.3M" "56.9M")
     
     echo -e "\n${YELLOW}Downloading YOLO11 model weights...${NC}"
     
@@ -55,17 +52,19 @@ download_models() {
     mkdir -p "$models_dir"
     
     # Download each model size
-    for size in n s m l x; do
+    for i in "${!model_sizes[@]}"; do
+        local size="${model_sizes[$i]}"
+        local size_value="${size_values[$i]}"
         local model_name="yolo11${size}.pt"
         local url="${base_url}/${model_name}"
         local output="${models_dir}/${model_name}"
         
         if [ -f "$output" ]; then
-            echo -e "${BLUE}ℹ ${model_name} (${model_sizes[$size]}) already exists${NC}"
+            echo -e "${BLUE}ℹ ${model_name} (${size_value}) already exists${NC}"
             continue
         fi
         
-        echo -e "\n${CYAN}Downloading ${model_name} (${model_sizes[$size]})...${NC}"
+        echo -e "\n${CYAN}Downloading ${model_name} (${size_value})...${NC}"
         if curl -# -L "$url" -o "$output"; then
             echo -e "${GREEN}✓ Successfully downloaded ${model_name}${NC}"
         else
@@ -115,14 +114,17 @@ source yolo_env/bin/activate
 echo -e "${YELLOW}Installing required packages...${NC}"
 echo -e "${CYAN}This may take a few minutes depending on your internet connection.${NC}\n"
 
-pip install --upgrade pip >/dev/null 2>&1
+pip install --upgrade pip
 progress 2 "Upgrading pip..."
 
-pip install -r requirements.txt 2>&1 | while read -r line; do
+echo -e "\n${CYAN}Installing project dependencies...${NC}"
+pip install -r requirements.txt --progress-bar on 2>&1 | while read -r line; do
     if [[ $line == *"Successfully installed"* ]]; then
         echo -e "${GREEN}✓${NC} $line"
     elif [[ $line == *"ERROR"* ]]; then
         echo -e "${RED}✗${NC} $line"
+    elif [[ $line == *"Collecting"* ]] || [[ $line == *"Installing"* ]]; then
+        echo -e "${BLUE}→${NC} $line"
     fi
 done
 
