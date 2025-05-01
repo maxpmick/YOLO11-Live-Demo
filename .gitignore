@@ -1,0 +1,4 @@
+models/
+yolo_env/
+.streamlit/
+*/__pycache__/*
