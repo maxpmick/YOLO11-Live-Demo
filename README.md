@@ -139,6 +139,11 @@ Typical performance on M4:
    - Check models directory permissions
    - Verify Python environment activation
 
+4. **Blank Webpage**
+   - Make sure to select the right interpreter based on your venv inside your IDE
+   - Verify Streamlit is properly installed in your active environment
+   - Check console for any startup errors
+
 ### Error Messages
 
 If you encounter errors:
