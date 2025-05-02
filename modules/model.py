@@ -6,6 +6,7 @@ import streamlit as st
 from ultralytics import YOLO
 import os
 import torch
+import shutil
 
 def download_model(task: str, size: str):
     """Download YOLO model weights if they don't exist."""
@@ -18,23 +19,26 @@ def download_model(task: str, size: str):
         'track': ''
     }
     
-    model_name = f"yolov8{size}{suffix_map[task]}.pt"
-    weights_path = f"models/yolo11{size}{suffix_map[task]}.pt"
+    model_name = f"yolo11{size}{suffix_map[task]}.pt"
+    weights_path = os.path.join('models', model_name)
     
+    # First check if model exists in models directory
+    if os.path.exists(weights_path):
+        return True
+        
+    # If not, ensure models directory exists and download
     if not os.path.exists('models'):
         os.makedirs('models')
         
-    if not os.path.exists(weights_path):
-        st.info(f"Downloading {model_name}...")
-        try:
-            model = YOLO(model_name)
-            model.export(format="pt", imgsz=640)
-            st.success(f"Downloaded {model_name} successfully!")
-            return True
-        except Exception as e:
-            st.error(f"Failed to download {model_name}: {str(e)}")
-            return False
-    return True
+    st.info(f"Downloading {model_name}...")
+    try:
+        model = YOLO(model_name)
+        shutil.copy2(model.ckpt_path, weights_path)
+        st.success(f"Downloaded {model_name} to models directory")
+        return True
+    except Exception as e:
+        st.error(f"Failed to download {model_name}: {str(e)}")
+        return False
 
 @st.cache_resource
 def load_model(task: str, size: str, device: str = 'cpu'):
@@ -48,14 +52,16 @@ def load_model(task: str, size: str, device: str = 'cpu'):
         'track': ''
     }
     
-    # Try to download model if it doesn't exist
-    if not download_model(task, size):
-        return None
-        
-    weights = f"models/yolo11{size}{suffix_map[task]}.pt"
+    model_name = f"yolo11{size}{suffix_map[task]}.pt"
+    weights_path = os.path.join('models', model_name)
+    
+    # Check if model exists first
+    if not os.path.exists(weights_path):
+        if not download_model(task, size):
+            return None
     
     try:
-        model = YOLO(weights)
+        model = YOLO(weights_path)
         model.to(device)
         model.fuse()
         model.model.eval()
@@ -74,7 +80,7 @@ def run_inference(model, frame, task, device='cpu', **kwargs):
         return []
         
     # Use CPU for pose detection due to MPS issues
-    curr_dev = 'cpu' if task == 'pose' else device
+    curr_dev = 'mps' if task == 'pose' else device
     
     inference_kwargs = {
         'source': frame,

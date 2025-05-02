@@ -33,6 +33,10 @@ else:
 MODEL_SIZES = ['n', 's', 'm', 'l', 'x']
 TASKS = ['detect', 'segment', 'classify', 'pose', 'obb', 'track']
 
+# -- Detection Configuration ---------------------------------------------
+DEFAULT_CONF_THRESH = 0.25  # Default confidence threshold
+DEFAULT_IOU_THRESH = 0.45   # Default IoU threshold
+
 # -- Visualization Configuration -----------------------------------------
 PALETTE = np.array([
     (255, 0, 0),    # Red

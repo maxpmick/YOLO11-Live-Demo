@@ -9,16 +9,26 @@ from .config import PALETTE, SKELETON_PARTS, CLASSES
 
 def draw_oriented_box(img, points, color, label=None):
     """Draw an oriented bounding box with its label."""
-    points = points.astype(np.int32)
-    # Draw the box
-    cv2.polylines(img, [points], True, color, 2)
-    
-    if label:
-        # Find top-left most point for label placement
-        x = min(points[:, 0])
-        y = min(points[:, 1])
-        cv2.putText(img, label, (x, y-5),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    try:
+        points = points.astype(np.int32)
+        
+        # Ensure color is a tuple of 3 integers
+        if isinstance(color, (tuple, list, np.ndarray)):
+            color = tuple(map(int, color[:3]))  # Convert to tuple and ensure 3 channels
+        else:
+            color = (0, 255, 0)  # Default to green if invalid color
+            
+        # Draw the box
+        cv2.polylines(img, [points], True, color, 2)
+        
+        if label:
+            # Find top-left most point for label placement
+            x = min(points[:, 0])
+            y = min(points[:, 1])
+            cv2.putText(img, label, (x, y-5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    except Exception as e:
+        st.error(f"Error drawing oriented box: {str(e)}")
 
 def draw_detection_box(img, box, conf, cls_id, color=(0,255,0), track_id=None):
     """Draw a standard detection box with label (and optional track ID)."""
@@ -99,7 +109,7 @@ def draw_pose_keypoints(img, person_keypoints):
         st.error(f"Error drawing pose keypoints: {str(e)}")
 
 def process_results(img, results, task, track_colors={}, position_history={}, 
-                   current_time=None, trail_duration=None):
+                   current_time=None, trail_duration=None, conf_thresh=0.25):
     """Process and visualize detection results."""
     if not results:
         return img
@@ -125,6 +135,10 @@ def process_results(img, results, task, track_colors={}, position_history={},
                         track_ids = boxes.id.cpu().numpy()
                     
                     for i, (xyxy, conf, cls) in enumerate(zip(xyxys, confs, clss)):
+                        # Skip if below confidence threshold
+                        if conf < conf_thresh:
+                            continue
+                            
                         # Get tracking ID and color
                         track_id = int(track_ids[i]) if track_ids is not None else None
                         color = track_colors.get(track_id, (0,255,0)) if track_id else (0,255,0)
@@ -147,15 +161,25 @@ def process_results(img, results, task, track_colors={}, position_history={},
                     classes = boxes.cls.cpu().numpy()
                     
                     for pts, conf, cls in zip(points, confs, classes):
+                        # Skip if below confidence threshold
+                        if conf < conf_thresh:
+                            continue
+                            
                         pts = pts.reshape(-1, 2)
-                        label = f"{int(cls)}:{conf:.2f}"
+                        label = f"{CLASSES.get(int(cls), f'class_{int(cls)}')}: {conf:.2f}"
                         color = PALETTE[int(cls) % len(PALETTE)]
                         draw_oriented_box(overlay, pts, color, label)
             
             # Segmentation Masks
             if hasattr(r, 'masks') and r.masks is not None and hasattr(r.masks, 'data'):
                 masks = r.masks.data.cpu().numpy()
+                confs = r.boxes.conf.cpu().numpy() if hasattr(r, 'boxes') else None
+                
                 for idx, mask in enumerate(masks):
+                    # Skip if below confidence threshold
+                    if confs is not None and confs[idx] < conf_thresh:
+                        continue
+                        
                     try:
                         if hasattr(r, 'boxes') and r.boxes is not None and hasattr(r.boxes, 'id'):
                             tid = int(r.boxes.id.cpu().numpy()[idx])
@@ -177,8 +201,13 @@ def process_results(img, results, task, track_colors={}, position_history={},
                 kp = getattr(r.keypoints, 'data', r.keypoints)
                 if kp is not None:
                     pts = kp.cpu().numpy()
+                    confs = r.boxes.conf.cpu().numpy() if hasattr(r, 'boxes') else None
+                    
                     people = pts if pts.ndim==3 else [pts] if pts.ndim==2 else []
-                    for person in people:
+                    for idx, person in enumerate(people):
+                        # Skip if below confidence threshold
+                        if confs is not None and confs[idx] < conf_thresh:
+                            continue
                         draw_pose_keypoints(overlay, person)
     except Exception as e:
         st.error(f"Error processing results: {str(e)}")

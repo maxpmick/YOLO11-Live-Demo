@@ -14,13 +14,14 @@ from ultralytics.utils.benchmarks import benchmark
 # Import our modules after Streamlit configuration
 from modules import (
     DEFAULT_DEVICE, MODEL_SIZES, TASKS, AVAILABLE_DEVICES,
+    DEFAULT_CONF_THRESH, DEFAULT_IOU_THRESH,
     load_model, run_inference, process_results,
     TrackingManager, CLASSES
 )
 
 # -- Streamlit UI Setup --------------------------------------------------
 st.set_page_config(layout="wide")
-st.title("YOLO11 Live Demo – M4 Optimized")
+st.title("YOLO11 Live Demo")
 
 # Create two columns for the main layout
 col1, col2 = st.columns([2, 1])
@@ -47,8 +48,22 @@ device = st.sidebar.selectbox(
 
 st.sidebar.write(f"**Device:** {device.upper()} | Torch {torch.__version__}")
 
+# Model settings
 size = st.sidebar.selectbox("Model size", MODEL_SIZES, index=0)
 options = {t: st.sidebar.checkbox(t.capitalize(), value=(t=='detect')) for t in TASKS}
+
+# Detection settings
+st.sidebar.markdown("---")
+st.sidebar.subheader("Detection Settings")
+conf_thresh = st.sidebar.slider(
+    "Confidence Threshold",
+    min_value=0.0,
+    max_value=1.0,
+    value=DEFAULT_CONF_THRESH,
+    step=0.05,
+    help="Minimum confidence score for detections"
+)
+
 benchmark_enabled = st.sidebar.checkbox("Startup benchmark", False)
 start, stop = st.sidebar.button("Start"), st.sidebar.button("Stop")
 
@@ -115,8 +130,8 @@ if start:
                 if task not in models:
                     continue
                 
-                # Run inference
-                results = run_inference(models[task], frame, task, device=device)
+                # Run inference with confidence threshold
+                results = run_inference(models[task], frame, task, device=device, conf=conf_thresh)
                 
                 if not results:  # Skip if no results
                     continue
@@ -124,38 +139,46 @@ if start:
                 # Update tracking for tracked objects
                 if task == 'track' and hasattr(results[0], 'boxes'):
                     boxes = results[0].boxes
-                    if hasattr(boxes, 'id'):
-                        track_ids = boxes.id.cpu().numpy()
+                    if hasattr(boxes, 'xyxy') and boxes.xyxy is not None:
                         xyxy = boxes.xyxy.cpu().numpy()
                         confs = boxes.conf.cpu().numpy()
                         clss = boxes.cls.cpu().numpy()
                         
-                        for i, (box, conf, cls, track_id) in enumerate(zip(xyxy, confs, clss, track_ids)):
-                            track_id = int(track_id)
-                            x1, y1, x2, y2 = box.astype(int)
-                            center_x = (x1 + x2) // 2
-                            center_y = (y1 + y2) // 2
-                            tracking.update_track(track_id, center_x, center_y)
+                        # Get track IDs if available
+                        track_ids = None
+                        if hasattr(boxes, 'id') and boxes.id is not None:
+                            track_ids = boxes.id.cpu().numpy()
                             
-                            # Add to detection data
-                            detection_data.append({
-                                'Task': 'Tracking',
-                                'ID': str(track_id),
-                                'Class': CLASSES.get(int(cls), f"class_{int(cls)}"),
-                                'Confidence': f"{conf:.2f}",
-                                'Position': f"({center_x}, {center_y})"
-                            })
-                        
-                        # Cleanup old tracks
-                        tracking.cleanup_old_tracks(set(track_ids))
+                            for i, (box, conf, cls) in enumerate(zip(xyxy, confs, clss)):
+                                if conf < conf_thresh:  # Skip low confidence detections
+                                    continue
+                                    
+                                track_id = int(track_ids[i])
+                                x1, y1, x2, y2 = box.astype(int)
+                                center_x = (x1 + x2) // 2
+                                center_y = (y1 + y2) // 2
+                                tracking.update_track(track_id, center_x, center_y)
+                                
+                                # Add to detection data
+                                detection_data.append({
+                                    'Task': 'Tracking',
+                                    'ID': str(track_id),
+                                    'Class': CLASSES.get(int(cls), f"class_{int(cls)}"),
+                                    'Confidence': f"{conf:.2f}",
+                                    'Position': f"({center_x}, {center_y})"
+                                })
+                            
+                            # Cleanup old tracks
+                            tracking.cleanup_old_tracks(set(track_ids))
                 
-                # Process and visualize results
+                # Process and visualize results with confidence threshold
                 frame = process_results(
                     frame, results, task,
                     track_colors=tracking.track_colors,
                     position_history=tracking.position_history,
                     current_time=time.time(),
-                    trail_duration=1.5
+                    trail_duration=1.5,
+                    conf_thresh=conf_thresh
                 )
 
                 # Add detection data for other tasks
